@@ -1,5 +1,7 @@
 {% set name = "diffpy.srreal" %}
 {% set version = "1.4.0" %}
+{% set srreal_family = version.split('.')[:2] | map('int') | list %}
+{% set libdiffpy_range = ">=1.5.0rc0" if srreal_family >= [1, 5] else "<1.5.0rc0" %}
 
 package:
   name: {{ name|lower }}
@@ -10,7 +12,7 @@ source:
   sha256: 34988d5e8e1bf321523de989a48fcac99cba5ff205de26c699e396b9c5a95365
 
 build:
-  number: 3
+  number: 4
   skip: true  # [py<311]
   script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
 
@@ -29,12 +31,12 @@ requirements:
     - setuptools
     - setuptools-git-versioning
     - libboost-python-devel
-    - libdiffpy
+    - libdiffpy {{ libdiffpy_range }}
     - numpy
   run:
     - python
     - libboost  # [win]
-    - libdiffpy
+    - libdiffpy {{ libdiffpy_range }}
     - libobjcryst
     - pyobjcryst
     - periodictable
