@@ -1,7 +1,14 @@
 {% set name = "diffpy.srreal" %}
 {% set version = "1.5.1" %}
 {% set build_number = 0 %}
-{% set srreal_cuda = "ON" if cuda_compiler_version != "None" else "OFF" %}
+
+# CPU and CUDA variants.  The CUDA variant has the higher build number, so it
+# is preferred where it can be installed.
+{% set build_variant = "cpu" %}    # [cuda_compiler_version == "None"]
+{% set srreal_cuda = "OFF" %}      # [cuda_compiler_version == "None"]
+{% set build_number = build_number + 100 %}                                  # [cuda_compiler_version != "None"]
+{% set build_variant = "cuda" ~ cuda_compiler_version | replace(".", "") %}  # [cuda_compiler_version != "None"]
+{% set srreal_cuda = "ON" %}                                                 # [cuda_compiler_version != "None"]
 
 package:
   name: {{ name|lower }}
@@ -15,10 +22,8 @@ source:
     - patches/0001-link-cudart-dynamically.patch
 
 build:
-  # Prefer the CUDA variant where it can be installed
-  number: {{ build_number + (100 if cuda_compiler_version != "None" else 0) }}
-  string: cuda{{ cuda_compiler_version | replace('.', '') }}_py{{ CONDA_PY }}h{{ PKG_HASH }}_{{ PKG_BUILDNUM }}  # [cuda_compiler_version != "None"]
-  string: cpu_py{{ CONDA_PY }}h{{ PKG_HASH }}_{{ PKG_BUILDNUM }}  # [cuda_compiler_version == "None"]
+  number: {{ build_number }}
+  string: {{ build_variant }}_py{{ CONDA_PY }}h{{ PKG_HASH }}_{{ PKG_BUILDNUM }}
   skip: true  # [py<312 or py>=315]
   script:
     - export CMAKE_GENERATOR=Ninja  # [linux]
@@ -27,6 +32,10 @@ build:
     - set "CMAKE_GENERATOR=Ninja"  # [win]
     - set "CMAKE_GENERATOR_PLATFORM="  # [win]
     - set "CMAKE_GENERATOR_TOOLSET="  # [win]
+    # The CUDA kernels need compute capability 7.0 (Volta).  CUDA 12 still
+    # targets older devices by default; drop them from the default list.
+    - export CUDAARCHS="${CUDAARCHS//50-real;52-real;60-real;61-real;/}"  # [linux and (cuda_compiler_version or "").startswith("12")]
+    - set "CUDAARCHS=%CUDAARCHS:50-real;52-real;60-real;61-real;=%"  # [win and (cuda_compiler_version or "").startswith("12")]
     # Without xsimd the build silently drops the SIMD kernels, so require it
     - {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation -Ccmake.define.CMAKE_REQUIRE_FIND_PACKAGE_xsimd=ON -Ccmake.define.SRREAL_CUDA={{ srreal_cuda }}
 
