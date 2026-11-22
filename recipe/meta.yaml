@@ -1,5 +1,7 @@
 {% set name = "diffpy.srreal" %}
-{% set version = "1.5.0" %}
+{% set version = "1.5.1" %}
+{% set build_number = 0 %}
+{% set srreal_cuda = "ON" if cuda_compiler_version != "None" else "OFF" %}
 
 package:
   name: {{ name|lower }}
@@ -7,22 +9,36 @@ package:
 
 source:
   url: https://pypi.org/packages/source/d/diffpy_srreal/diffpy_srreal-{{ version }}.tar.gz
-  sha256: 37a62396f95b0d08be13259fcbd8b85437c54b31629cef18126cd7daa218a535
+  sha256: a7b3f5a0ae6d4ed88535c17e53385753ea509a233db3a3609e97564822efb55b
+  patches:
+    # conda-forge provides the CUDA runtime as a package, link it dynamically
+    - patches/0001-link-cudart-dynamically.patch
 
 build:
-  number: 0
+  # Prefer the CUDA variant where it can be installed
+  number: {{ build_number + (100 if cuda_compiler_version != "None" else 0) }}
+  string: cuda{{ cuda_compiler_version | replace('.', '') }}_py{{ CONDA_PY }}h{{ PKG_HASH }}_{{ PKG_BUILDNUM }}  # [cuda_compiler_version != "None"]
+  string: cpu_py{{ CONDA_PY }}h{{ PKG_HASH }}_{{ PKG_BUILDNUM }}  # [cuda_compiler_version == "None"]
   skip: true  # [py<312 or py>=315]
   script:
     - export CMAKE_GENERATOR=Ninja  # [linux]
-    - {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+    # The Visual Studio generator cannot compile CUDA without the MSBuild
+    # integration of the CUDA toolkit.  Ninja takes no platform or toolset.
+    - set "CMAKE_GENERATOR=Ninja"  # [win]
+    - set "CMAKE_GENERATOR_PLATFORM="  # [win]
+    - set "CMAKE_GENERATOR_TOOLSET="  # [win]
+    # Without xsimd the build silently drops the SIMD kernels, so require it
+    - {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation -Ccmake.define.CMAKE_REQUIRE_FIND_PACKAGE_xsimd=ON -Ccmake.define.SRREAL_CUDA={{ srreal_cuda }}
 
 requirements:
   build:
     - {{ compiler('c') }}
     - {{ compiler('cxx') }}
+    - {{ compiler('cuda') }}              # [cuda_compiler_version != "None"]
     - {{ stdlib('c') }}
     - cmake
     - ninja
+    - m2-patch                            # [win]
     - python                              # [build_platform != target_platform]
     - cross-python_{{ target_platform }}  # [build_platform != target_platform]
     - nanobind >=3.1,<4                   # [build_platform != target_platform]
@@ -36,16 +52,25 @@ requirements:
     - gsl
     # conda-forge's libgslcblas is a symlink to the BLAS-switchable libcblas
     - libcblas
+    - xsimd >=14
+    - cuda-version {{ cuda_compiler_version }}.*  # [cuda_compiler_version != "None"]
+    - cuda-cudart-dev                             # [cuda_compiler_version != "None"]
   run:
     - python
     - numpy
     - pyobjcryst
     - periodictable
     - diffpy.structure
+    # Leaves the CPU variant to machines without a CUDA driver
+    - __cuda                                      # [cuda_compiler_version != "None"]
+    # cuda-cudart-dev has run_exports on Linux only
+    - cuda-cudart                                 # [win and cuda_compiler_version != "None"]
 
 test:
   source_files:
     - tests
+  files:
+    - check_kernels.py
   imports:
     - diffpy.srreal
     - diffpy.srreal.srreal_ext
@@ -56,6 +81,8 @@ test:
     - pip check
     - test -f $SP_DIR/diffpy/srreal/data/bvparm2011sel.cif  # [unix]
     - if not exist %SP_DIR%\diffpy\srreal\data\bvparm2011sel.cif exit 1  # [win]
+    - python check_kernels.py         # [cuda_compiler_version == "None"]
+    - python check_kernels.py --cuda  # [cuda_compiler_version != "None"]
     - pytest
 
 about:
